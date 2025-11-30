@@ -26,7 +26,7 @@ export default function Home() {
         setResult(null);
 
         try {
-            const app = await client(HF_SPACE_URL, { hf_token: null });
+            const app = await client(HF_SPACE_URL);
             console.log("Gradio client initialized."); 
 
             const response = await app.predict("/predict", [file]) as any;
