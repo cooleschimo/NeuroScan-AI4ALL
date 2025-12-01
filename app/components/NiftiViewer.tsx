@@ -8,9 +8,10 @@ interface NiftiViewerProps {
   heatmapData: string;  // base64 encoded heatmap NIfTI
   predictedClass: string;
   confidence: number;
+  showExplanations?: boolean;  // Optional: show view explanations and legends (default true)
 }
 
-export default function NiftiViewer({ scanData, heatmapData, predictedClass, confidence }: NiftiViewerProps) {
+export default function NiftiViewer({ scanData, heatmapData, predictedClass, confidence, showExplanations = true }: NiftiViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const nvRef = useRef<Niivue | null>(null);
 
@@ -94,9 +95,15 @@ export default function NiftiViewer({ scanData, heatmapData, predictedClass, con
         nvRef.current.updateGLVolume();
       }
 
-      // Set view to show all 3 planes and change crosshair color
+      // Set view to show 3 planes + 3D rendering (4 panels in 2x2 grid)
+      // sliceTypeMultiplanar = 3 orthogonal + 1 3D render = 4 panels
       nvRef.current.setSliceType(nvRef.current.sliceTypeMultiplanar);
-      nvRef.current.opts.crosshairColor = [0, 1, 0, 1];  // Green crosshairs instead of red
+      nvRef.current.setMultiplanarLayout(2); // 2x2 grid layout
+      nvRef.current.opts.crosshairColor = [0, 1, 0, 1];  // Green crosshairs
+      nvRef.current.opts.isColorbar = false; // Hide colorbar
+
+      // Configure 3D rendering in 4th panel
+      nvRef.current.setRenderAzimuthElevation(120, 15);
 
       // Clean up object URLs to free memory
       URL.revokeObjectURL(scanUrl);
@@ -143,60 +150,68 @@ export default function NiftiViewer({ scanData, heatmapData, predictedClass, con
         />
       </div>
 
-      {/* View Explanation */}
-      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-        <p className="text-sm font-bold text-slate-700 mb-2">Understanding the Views</p>
-        <div className="grid grid-cols-3 gap-3 text-xs text-slate-600">
-          <div>
-            <p className="font-semibold text-slate-800">Left Panel: Side View</p>
-            <p className="text-slate-500">Sagittal slice (L↔R)</p>
+      {showExplanations && (
+        <>
+          {/* View Explanation */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <p className="text-sm font-bold text-slate-700 mb-2">Understanding the Views</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
+              <div>
+                <p className="font-semibold text-slate-800">Top Left: Side View</p>
+                <p className="text-slate-500">Sagittal (L↔R)</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800">Top Right: Front View</p>
+                <p className="text-slate-500">Coronal (F↔B)</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800">Bottom Left: Top View</p>
+                <p className="text-slate-500">Axial (T↔B)</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800">Bottom Right: 3D View</p>
+                <p className="text-slate-500">Volume Rendering</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              <strong>Note:</strong> Each sample shows a 64×64×64 voxel segment containing a blood vessel.
+              Some samples may appear faint or empty if the vessel segment is small or has low contrast.
+            </p>
           </div>
-          <div>
-            <p className="font-semibold text-slate-800">Middle Panel: Front View</p>
-            <p className="text-slate-500">Coronal slice (F↔B)</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-800">Right Panel: Top View</p>
-            <p className="text-slate-500">Axial slice (T↔B)</p>
-          </div>
-        </div>
-        <p className="text-xs text-slate-500 mt-3">
-          <strong>Note:</strong> Each sample shows a 64×64×64 voxel segment containing a blood vessel.
-          Some samples may appear faint or empty if the vessel segment is small or has low contrast.
-        </p>
-      </div>
 
-      {/* Legend */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200">
-        <p className="text-sm font-bold text-slate-700 mb-3">Aneurysm Detection Heatmap</p>
-        <div className="flex items-center gap-4 mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-gray-400 rounded"></div>
-            <span className="text-sm text-slate-600">Vessel Tissue</span>
+          {/* Legend */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200">
+            <p className="text-sm font-bold text-slate-700 mb-3">Aneurysm Detection Heatmap</p>
+            <div className="flex items-center gap-4 mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-gray-400 rounded"></div>
+                <span className="text-sm text-slate-600">Vessel Tissue</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 h-4 rounded" style={{background: 'linear-gradient(to right, #FFFF00, #FF8C00, #FF0000)'}}></div>
+                <span className="text-sm text-slate-600">Suspicion Level (Low → High)</span>
+              </div>
+            </div>
+            <div className="text-xs text-slate-600 space-y-1 bg-slate-50 p-3 rounded">
+              <p>• <strong>Yellow overlay:</strong> Low suspicion - minor anomalies detected</p>
+              <p>• <strong>Orange overlay:</strong> Moderate suspicion - potential abnormalities</p>
+              <p>• <strong>Red overlay:</strong> High suspicion - likely aneurysm location</p>
+              <p>• <strong>No overlay:</strong> No significant abnormalities detected in the vessel</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-16 h-4 rounded" style={{background: 'linear-gradient(to right, #FFFF00, #FF8C00, #FF0000)'}}></div>
-            <span className="text-sm text-slate-600">Suspicion Level (Low → High)</span>
-          </div>
-        </div>
-        <div className="text-xs text-slate-600 space-y-1 bg-slate-50 p-3 rounded">
-          <p>• <strong>Yellow overlay:</strong> Low suspicion - minor anomalies detected</p>
-          <p>• <strong>Orange overlay:</strong> Moderate suspicion - potential abnormalities</p>
-          <p>• <strong>Red overlay:</strong> High suspicion - likely aneurysm location</p>
-          <p>• <strong>No overlay:</strong> No significant abnormalities detected in the vessel</p>
-        </div>
-      </div>
 
-      {/* Controls Help */}
-      <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-        <p className="text-sm font-bold text-blue-900 mb-2">Viewer Controls</p>
-        <ul className="text-xs text-blue-800 space-y-1">
-          <li>• <strong>Click:</strong> Move crosshair and view different slice positions</li>
-          <li>• <strong>Right Click + Drag:</strong> Adjust brightness and contrast</li>
-          <li>• <strong>Scroll / Two-finger swipe:</strong> Zoom in and out</li>
-          <li>• <strong>Double Click:</strong> Reset view</li>
-        </ul>
-      </div>
+          {/* Controls Help */}
+          <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+            <p className="text-sm font-bold text-blue-900 mb-2">Viewer Controls</p>
+            <ul className="text-xs text-blue-800 space-y-1">
+              <li>• <strong>Click:</strong> Move crosshair and view different slice positions</li>
+              <li>• <strong>Right Click + Drag:</strong> Adjust brightness and contrast</li>
+              <li>• <strong>Scroll / Two-finger swipe:</strong> Zoom in and out</li>
+              <li>• <strong>Double Click:</strong> Reset view</li>
+            </ul>
+          </div>
+        </>
+      )}
     </div>
   );
 }

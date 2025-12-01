@@ -21,9 +21,32 @@ interface AnalysisResult {
   confidence: number;
 }
 
+interface BatchResult extends AnalysisResult {
+  filename: string;
+  fileIndex: number;
+}
+
 export default function Home() {
+    // Single upload state
     const [file, setFile] = useState<File | null>(null);
     const [result, setResult] = useState<AnalysisResult | null>(null);
+
+    // Batch upload state
+    const [batchMode, setBatchMode] = useState(false);
+    const [files, setFiles] = useState<File[]>([]);
+    const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+    const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+    const [selectedResult, setSelectedResult] = useState<BatchResult | null>(null);
+    const [selectedForCompare, setSelectedForCompare] = useState<BatchResult[]>([]);
+
+    // Compare mode state
+    const [compareMode, setCompareMode] = useState(false);
+    const [fileA, setFileA] = useState<File | null>(null);
+    const [fileB, setFileB] = useState<File | null>(null);
+    const [resultA, setResultA] = useState<AnalysisResult | null>(null);
+    const [resultB, setResultB] = useState<AnalysisResult | null>(null);
+
+    // Common state
     const [loading, setLoading] = useState(false);
     const [scrolled, setScrolled] = useState(false);
 
@@ -79,6 +102,109 @@ export default function Home() {
 
             alert(errorMessage);
 
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleBatchUpload = async () => {
+        if (files.length === 0) return;
+        setLoading(true);
+        setBatchResults([]);
+        setBatchProgress({ current: 0, total: files.length });
+
+        const results: BatchResult[] = [];
+
+        try {
+            const app = await client(HF_SPACE_URL);
+            console.log("Gradio client initialized for batch processing.");
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
+                setBatchProgress({ current: i + 1, total: files.length });
+
+                try {
+                    // Add timeout wrapper (2 minutes per file)
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Timeout')), 120000)
+                    );
+
+                    const predictPromise = app.predict("/predict", [file]);
+
+                    const response = await Promise.race([predictPromise, timeoutPromise]) as any;
+                    console.log(`Response for ${file.name}:`, response);
+
+                    if (response?.data?.[0]) {
+                        const analysisResult: AnalysisResult = response.data[0];
+                        results.push({
+                            ...analysisResult,
+                            filename: file.name,
+                            fileIndex: i
+                        });
+                        // Update results incrementally
+                        setBatchResults([...results]);
+                        console.log(`✓ Successfully processed ${file.name}`);
+                    } else {
+                        console.error(`✗ Invalid response for ${file.name}`);
+                    }
+                } catch (error: any) {
+                    console.error(`✗ Error processing ${file.name}:`, error.message || error);
+                    // Continue with next file even if this one fails
+                }
+
+                // Small delay between requests to avoid overwhelming the backend
+                if (i < files.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+
+            console.log(`Batch complete: ${results.length}/${files.length} processed successfully`);
+
+            if (results.length === 0) {
+                alert('No files were processed successfully. Please check the console for errors.');
+            } else if (results.length < files.length) {
+                alert(`Processed ${results.length} out of ${files.length} files. Some files failed - check console for details.`);
+            }
+
+        } catch (error: any) {
+            console.error("Batch processing error:", error);
+            alert("Error initializing batch processing: " + (error.message || "Unknown error"));
+        } finally {
+            setLoading(false);
+            setBatchProgress({ current: 0, total: 0 });
+        }
+    };
+
+    const handleCompareUpload = async () => {
+        if (!fileA || !fileB) return;
+        setLoading(true);
+        setResultA(null);
+        setResultB(null);
+
+        try {
+            const app = await client(HF_SPACE_URL);
+            console.log("Gradio client initialized for comparison.");
+
+            // Process both files
+            const [responseA, responseB] = await Promise.all([
+                app.predict("/predict", [fileA]) as any,
+                app.predict("/predict", [fileB]) as any
+            ]);
+
+            if (responseA?.data?.[0]) {
+                setResultA(responseA.data[0]);
+            }
+
+            if (responseB?.data?.[0]) {
+                setResultB(responseB.data[0]);
+            }
+
+            console.log("Comparison complete.");
+
+        } catch (error: any) {
+            console.error("Error during comparison:", error);
+            alert("Comparison error: " + (error.message || "Unknown error"));
         } finally {
             setLoading(false);
         }
@@ -338,57 +464,245 @@ export default function Home() {
                 </div>
     
                 <div className="p-8 md:p-12 space-y-8">
-                    {/* File Upload Zone */}
-                    <div className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 group ${
-                      file ? 'border-cyan-500 bg-cyan-50' : 'border-slate-300 hover:border-cyan-400 hover:bg-slate-50'
-                    }`}>
-                      <input
-                        type="file"
-                        accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"
-                        onChange={(e) => setFile(e.target.files?.[0] || null)}
-                        className="hidden"
-                        id="file-upload"
-                      />
-                      <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
-                        {file ? (
-                          <>
-                            <div className="w-16 h-16 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 border border-cyan-200">
-                              <CheckCircle2 className="w-8 h-8" />
-                            </div>
-                            <div>
-                              <p className="text-xl font-bold text-slate-900 break-all">{file.name}</p>
-                              <p className="text-sm text-cyan-600 mt-1 font-semibold">File loaded successfully</p>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-16 h-16 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-colors border border-slate-200">
-                              <Upload className="w-8 h-8" />
-                            </div>
-                            <div>
-                              <p className="text-xl font-bold text-slate-900">Drop NIfTI file or click to browse</p>
-                              <p className="text-base text-slate-500 mt-2 font-medium">Supports .nii.gz 3D volumes</p>
-                            </div>
-                          </>
-                        )}
-                      </label>
+                    {/* Single/Batch/Compare Mode Toggle */}
+                    <div className="flex items-center justify-center gap-3 pb-4">
+                      <button
+                        onClick={() => {
+                          setBatchMode(false);
+                          setCompareMode(false);
+                          setFiles([]);
+                          setBatchResults([]);
+                          setFileA(null);
+                          setFileB(null);
+                          setResultA(null);
+                          setResultB(null);
+                        }}
+                        className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                          !batchMode && !compareMode
+                            ? 'bg-cyan-600 text-white shadow-lg'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Single
+                      </button>
+                      <button
+                        onClick={() => {
+                          setBatchMode(false);
+                          setCompareMode(true);
+                          setFile(null);
+                          setResult(null);
+                          setFiles([]);
+                          setBatchResults([]);
+                        }}
+                        className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                          compareMode
+                            ? 'bg-cyan-600 text-white shadow-lg'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Compare
+                      </button>
+                      <button
+                        onClick={() => {
+                          setBatchMode(true);
+                          setCompareMode(false);
+                          setFile(null);
+                          setResult(null);
+                          setFileA(null);
+                          setFileB(null);
+                          setResultA(null);
+                          setResultB(null);
+                        }}
+                        className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                          batchMode
+                            ? 'bg-cyan-600 text-white shadow-lg'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Batch
+                      </button>
                     </div>
-    
+
+                    {/* File Upload Zone */}
+                    {!batchMode && !compareMode ? (
+                      // Single file upload
+                      <div className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 group ${
+                        file ? 'border-cyan-500 bg-cyan-50' : 'border-slate-300 hover:border-cyan-400 hover:bg-slate-50'
+                      }`}>
+                        <input
+                          type="file"
+                          accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"
+                          onChange={(e) => setFile(e.target.files?.[0] || null)}
+                          className="hidden"
+                          id="file-upload"
+                        />
+                        <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
+                          {file ? (
+                            <>
+                              <div className="w-16 h-16 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 border border-cyan-200">
+                                <CheckCircle2 className="w-8 h-8" />
+                              </div>
+                              <div>
+                                <p className="text-xl font-bold text-slate-900 break-all">{file.name}</p>
+                                <p className="text-sm text-cyan-600 mt-1 font-semibold">File loaded successfully</p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-16 h-16 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-colors border border-slate-200">
+                                <Upload className="w-8 h-8" />
+                              </div>
+                              <div>
+                                <p className="text-xl font-bold text-slate-900">Drop NIfTI file or click to browse</p>
+                                <p className="text-base text-slate-500 mt-2 font-medium">Supports .nii.gz 3D volumes</p>
+                              </div>
+                            </>
+                          )}
+                        </label>
+                      </div>
+                    ) : compareMode ? (
+                      // Compare mode - two file uploads side by side
+                      <div className="grid md:grid-cols-2 gap-4">
+                        {/* File A Upload */}
+                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 group ${
+                          fileA ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="file"
+                            accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"
+                            onChange={(e) => setFileA(e.target.files?.[0] || null)}
+                            className="hidden"
+                            id="file-upload-a"
+                          />
+                          <label htmlFor="file-upload-a" className="cursor-pointer flex flex-col items-center gap-3">
+                            {fileA ? (
+                              <>
+                                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 border border-blue-200">
+                                  <CheckCircle2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-blue-600 mb-1">Scan A</p>
+                                  <p className="text-base font-bold text-slate-900 break-all">{fileA.name}</p>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="w-12 h-12 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-colors border border-slate-200">
+                                  <Upload className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-600 mb-1">Scan A</p>
+                                  <p className="text-base font-bold text-slate-900">Upload first scan</p>
+                                </div>
+                              </>
+                            )}
+                          </label>
+                        </div>
+
+                        {/* File B Upload */}
+                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 group ${
+                          fileB ? 'border-purple-500 bg-purple-50' : 'border-slate-300 hover:border-purple-400 hover:bg-slate-50'
+                        }`}>
+                          <input
+                            type="file"
+                            accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"
+                            onChange={(e) => setFileB(e.target.files?.[0] || null)}
+                            className="hidden"
+                            id="file-upload-b"
+                          />
+                          <label htmlFor="file-upload-b" className="cursor-pointer flex flex-col items-center gap-3">
+                            {fileB ? (
+                              <>
+                                <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 border border-purple-200">
+                                  <CheckCircle2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-purple-600 mb-1">Scan B</p>
+                                  <p className="text-base font-bold text-slate-900 break-all">{fileB.name}</p>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="w-12 h-12 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-colors border border-slate-200">
+                                  <Upload className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-600 mb-1">Scan B</p>
+                                  <p className="text-base font-bold text-slate-900">Upload second scan</p>
+                                </div>
+                              </>
+                            )}
+                          </label>
+                        </div>
+                      </div>
+                    ) : batchMode ? (
+                      // Batch file upload
+                      <div className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 group ${
+                        files.length > 0 ? 'border-cyan-500 bg-cyan-50' : 'border-slate-300 hover:border-cyan-400 hover:bg-slate-50'
+                      }`}>
+                        <input
+                          type="file"
+                          accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"
+                          onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                          className="hidden"
+                          id="batch-file-upload"
+                          multiple
+                        />
+                        <label htmlFor="batch-file-upload" className="cursor-pointer flex flex-col items-center gap-4">
+                          {files.length > 0 ? (
+                            <>
+                              <div className="w-16 h-16 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 border border-cyan-200">
+                                <CheckCircle2 className="w-8 h-8" />
+                              </div>
+                              <div>
+                                <p className="text-xl font-bold text-slate-900">{files.length} files selected</p>
+                                <p className="text-sm text-cyan-600 mt-1 font-semibold">Ready for batch processing</p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-16 h-16 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-colors border border-slate-200">
+                                <Upload className="w-8 h-8" />
+                              </div>
+                              <div>
+                                <p className="text-xl font-bold text-slate-900">Drop multiple NIfTI files or click to browse</p>
+                                <p className="text-base text-slate-500 mt-2 font-medium">Supports .nii.gz 3D volumes</p>
+                              </div>
+                            </>
+                          )}
+                        </label>
+                      </div>
+                    ) : null}
+
                     {/* Analysis Button */}
-                    <button 
-                      onClick={handleUpload}
-                      disabled={!file || loading}
+                    <button
+                      onClick={compareMode ? handleCompareUpload : (batchMode ? handleBatchUpload : handleUpload)}
+                      disabled={
+                        compareMode
+                          ? (!fileA || !fileB || loading)
+                          : (batchMode ? (files.length === 0 || loading) : (!file || loading))
+                      }
                       className={`w-full py-5 rounded-xl font-bold text-xl transition-all ${
-                        !file 
-                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' 
+                        (compareMode ? (!fileA || !fileB) : (batchMode ? files.length === 0 : !file))
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                           : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 hover:shadow-xl hover:shadow-cyan-500/30 text-white'
                       }`}
                     >
                       {loading ? (
                         <span className="flex items-center justify-center gap-2">
-                          <Activity className="w-6 h-6 animate-spin" /> Analyzing Volume...
+                          <Activity className="w-6 h-6 animate-spin" />
+                          {compareMode
+                            ? 'Comparing Scans...'
+                            : (batchMode
+                              ? `Processing ${batchProgress.current} of ${batchProgress.total}...`
+                              : 'Analyzing Volume...'
+                            )
+                          }
                         </span>
-                      ) : "Run Analysis"}
+                      ) : compareMode
+                        ? 'Compare Scans'
+                        : (batchMode ? `Run Batch Analysis (${files.length} files)` : "Run Analysis")
+                      }
                     </button>
     
                     {/* Results Display with Visualization */}
@@ -438,6 +752,600 @@ export default function Home() {
 
                         <div className="p-4 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800 leading-relaxed text-center font-medium">
                           Disclaimer: This tool is for research and experimental purposes only. Results must be clinically verified.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Compare Mode Side-by-Side Results */}
+                    {compareMode && resultA && resultB && (
+                      <div className="space-y-6 pt-8 border-t border-slate-200 animate-in fade-in slide-in-from-bottom-4">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider text-center">Side-by-Side Comparison</h3>
+
+                        <div className="grid md:grid-cols-2 gap-6">
+                          {/* Scan A Results */}
+                          <div className="space-y-4 p-6 bg-blue-50 rounded-2xl border-2 border-blue-200">
+                            <div className="text-center mb-4">
+                              <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Scan A</p>
+                              <p className="text-sm text-slate-600 font-mono truncate">{fileA?.name}</p>
+                            </div>
+
+                            {/* Classification Bars */}
+                            <div className="space-y-3">
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-700 font-bold flex items-center gap-1">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-500"/> Normal
+                                  </span>
+                                  <span className="font-mono text-emerald-600 font-black text-sm">
+                                    {Math.round((resultA.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100)}%
+                                  </span>
+                                </div>
+                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-emerald-500 transition-all duration-1000"
+                                    style={{width: `${(resultA.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100}%`}}
+                                  ></div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-700 font-bold flex items-center gap-1">
+                                    <AlertCircle className="w-4 h-4 text-rose-500"/> Aneurysm
+                                  </span>
+                                  <span className="font-mono text-rose-600 font-black text-sm">
+                                    {Math.round((resultA.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100)}%
+                                  </span>
+                                </div>
+                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-rose-500 transition-all duration-1000"
+                                    style={{width: `${(resultA.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100}%`}}
+                                  ></div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 3D Visualization A */}
+                            {resultA.scan_data && resultA.heatmap_data && (
+                              <div className="mt-4">
+                                <NiftiViewer
+                                  scanData={resultA.scan_data}
+                                  heatmapData={resultA.heatmap_data}
+                                  predictedClass={resultA.predicted_class}
+                                  confidence={resultA.confidence}
+                                  showExplanations={false}
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Scan B Results */}
+                          <div className="space-y-4 p-6 bg-purple-50 rounded-2xl border-2 border-purple-200">
+                            <div className="text-center mb-4">
+                              <p className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-1">Scan B</p>
+                              <p className="text-sm text-slate-600 font-mono truncate">{fileB?.name}</p>
+                            </div>
+
+                            {/* Classification Bars */}
+                            <div className="space-y-3">
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-700 font-bold flex items-center gap-1">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-500"/> Normal
+                                  </span>
+                                  <span className="font-mono text-emerald-600 font-black text-sm">
+                                    {Math.round((resultB.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100)}%
+                                  </span>
+                                </div>
+                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-emerald-500 transition-all duration-1000"
+                                    style={{width: `${(resultB.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100}%`}}
+                                  ></div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-700 font-bold flex items-center gap-1">
+                                    <AlertCircle className="w-4 h-4 text-rose-500"/> Aneurysm
+                                  </span>
+                                  <span className="font-mono text-rose-600 font-black text-sm">
+                                    {Math.round((resultB.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100)}%
+                                  </span>
+                                </div>
+                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-rose-500 transition-all duration-1000"
+                                    style={{width: `${(resultB.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100}%`}}
+                                  ></div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 3D Visualization B */}
+                            {resultB.scan_data && resultB.heatmap_data && (
+                              <div className="mt-4">
+                                <NiftiViewer
+                                  scanData={resultB.scan_data}
+                                  heatmapData={resultB.heatmap_data}
+                                  predictedClass={resultB.predicted_class}
+                                  confidence={resultB.confidence}
+                                  showExplanations={false}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Single explanation section at bottom */}
+                        <div className="space-y-4">
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <p className="text-sm font-bold text-slate-700 mb-2">Understanding the Views</p>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
+                              <div>
+                                <p className="font-semibold text-slate-800">Top Left: Side View</p>
+                                <p className="text-slate-500">Sagittal (L↔R)</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-slate-800">Top Right: Front View</p>
+                                <p className="text-slate-500">Coronal (F↔B)</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-slate-800">Bottom Left: Top View</p>
+                                <p className="text-slate-500">Axial (T↔B)</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-slate-800">Bottom Right: 3D View</p>
+                                <p className="text-slate-500">Volume Rendering</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <p className="text-sm font-bold text-slate-700 mb-3">Aneurysm Detection Heatmap</p>
+                            <div className="flex items-center gap-4 mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 bg-gray-400 rounded"></div>
+                                <span className="text-sm text-slate-600">Vessel Tissue</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 h-4 rounded" style={{background: 'linear-gradient(to right, #FFFF00, #FF8C00, #FF0000)'}}></div>
+                                <span className="text-sm text-slate-600">Suspicion Level (Low → High)</span>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-600 space-y-1 bg-slate-50 p-3 rounded">
+                              <p>• <strong>Yellow:</strong> Low suspicion</p>
+                              <p>• <strong>Orange:</strong> Moderate suspicion</p>
+                              <p>• <strong>Red:</strong> High suspicion - likely aneurysm</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                            <p className="text-sm font-bold text-blue-900 mb-2">Viewer Controls</p>
+                            <ul className="text-xs text-blue-800 space-y-1">
+                              <li>• <strong>Click:</strong> Move crosshair</li>
+                              <li>• <strong>Right Click + Drag:</strong> Adjust brightness/contrast</li>
+                              <li>• <strong>Scroll:</strong> Zoom</li>
+                            </ul>
+                          </div>
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800 leading-relaxed text-center font-medium">
+                          Disclaimer: This tool is for research and experimental purposes only. Results must be clinically verified.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Batch Results Grid */}
+                    {batchMode && batchResults.length > 0 && (
+                      <div className="space-y-6 pt-8 border-t border-slate-200 animate-in fade-in slide-in-from-bottom-4">
+                        <div className="flex items-center justify-between flex-wrap gap-3">
+                          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
+                            Batch Results ({batchResults.length} files)
+                          </h3>
+                          <div className="flex items-center gap-3">
+                            {selectedForCompare.length === 2 && (
+                              <button
+                                onClick={() => {
+                                  // Open comparison modal with the two selected scans
+                                  setSelectedResult(null); // Clear single view
+                                }}
+                                className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-bold hover:bg-cyan-500 transition-all flex items-center gap-2"
+                              >
+                                Compare Selected ({selectedForCompare.length})
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                const aneurysmFiles = batchResults.filter(r => r.predicted_class === 'Aneurysm');
+                                const normalFiles = batchResults.filter(r => r.predicted_class === 'Normal');
+                                alert(`Aneurysm: ${aneurysmFiles.length} files\nNormal: ${normalFiles.length} files\n\nDownload feature coming soon!`);
+                              }}
+                              className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all flex items-center gap-2"
+                            >
+                              <Download className="w-4 h-4" />
+                              Export Results
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Selection Instructions */}
+                        {selectedForCompare.length > 0 && (
+                          <div className="flex items-center justify-center gap-2 text-sm bg-cyan-50 p-3 rounded-lg border border-cyan-200">
+                            <span className="text-cyan-700 font-semibold">
+                              {selectedForCompare.length === 1
+                                ? 'Select one more scan to compare'
+                                : 'Click "Compare Selected" to view side-by-side'}
+                            </span>
+                            <button
+                              onClick={() => setSelectedForCompare([])}
+                              className="text-cyan-600 hover:text-cyan-800 underline font-bold"
+                            >
+                              Clear Selection
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Color Legend */}
+                        <div className="flex items-center justify-center gap-6 text-sm bg-slate-50 p-4 rounded-lg border border-slate-200">
+                          <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 rounded bg-emerald-500"></div>
+                            <span className="text-slate-600 font-semibold">Normal (Confidence &gt; 70%)</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 rounded bg-amber-500"></div>
+                            <span className="text-slate-600 font-semibold">Uncertain (50-70%)</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 rounded bg-rose-500"></div>
+                            <span className="text-slate-600 font-semibold">Aneurysm (Confidence &gt; 70%)</span>
+                          </div>
+                        </div>
+
+                        {/* Grid View - Compact */}
+                        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                          {batchResults.map((result, idx) => {
+                            const isAneurysm = result.predicted_class === 'Aneurysm';
+                            const confidence = result.confidence * 100;
+                            const isSelected = selectedForCompare.some(s => s.fileIndex === result.fileIndex);
+
+                            // Determine color based on prediction and confidence
+                            let colorClass = 'border-amber-400 bg-amber-50';
+                            if (confidence > 70) {
+                              colorClass = isAneurysm
+                                ? 'border-rose-400 bg-rose-50'
+                                : 'border-emerald-400 bg-emerald-50';
+                            }
+
+                            // Add selection styling
+                            if (isSelected) {
+                              colorClass = 'border-cyan-600 bg-cyan-100 ring-2 ring-cyan-200';
+                            }
+
+                            return (
+                              <div key={idx} className="relative">
+                                <button
+                                  onClick={() => setSelectedResult(result)}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    if (isSelected) {
+                                      setSelectedForCompare(selectedForCompare.filter(s => s.fileIndex !== result.fileIndex));
+                                    } else if (selectedForCompare.length < 2) {
+                                      setSelectedForCompare([...selectedForCompare, result]);
+                                    }
+                                  }}
+                                  className={`w-full p-2 rounded-lg border-2 ${colorClass} hover:shadow-md transition-all text-left relative`}
+                                  title={result.filename}
+                                >
+                                  {/* Selection Checkbox - Smaller */}
+                                  <div
+                                    className="absolute top-1 right-1 z-10"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isSelected) {
+                                        setSelectedForCompare(selectedForCompare.filter(s => s.fileIndex !== result.fileIndex));
+                                      } else if (selectedForCompare.length < 2) {
+                                        setSelectedForCompare([...selectedForCompare, result]);
+                                      }
+                                    }}
+                                  >
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                                      isSelected
+                                        ? 'bg-cyan-600 border-cyan-600'
+                                        : 'bg-white border-slate-300 hover:border-cyan-400'
+                                    }`}>
+                                      {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                    </div>
+                                  </div>
+
+                                  <div className="pr-5">
+                                    <p className="text-xs text-slate-500 font-mono truncate mb-1">{result.filename}</p>
+                                    <p className={`text-lg font-black ${
+                                      isAneurysm ? 'text-rose-700' : 'text-emerald-700'
+                                    }`}>
+                                      {Math.round(confidence)}%
+                                    </p>
+                                  </div>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800 leading-relaxed text-center font-medium">
+                          Disclaimer: This tool is for research and experimental purposes only. Results must be clinically verified.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Comparison Modal for Selected Batch Scans */}
+                    {selectedForCompare.length === 2 && !selectedResult && (
+                      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedForCompare([])}>
+                        <div className="bg-white rounded-3xl max-w-7xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                          {/* Modal Header */}
+                          <div className="sticky top-0 bg-white border-b border-slate-200 p-6 rounded-t-3xl flex items-center justify-between z-10">
+                            <div>
+                              <h3 className="text-2xl font-bold text-slate-900">Scan Comparison</h3>
+                              <p className="text-sm text-slate-500 mt-1">Side-by-Side Analysis</p>
+                            </div>
+                            <button
+                              onClick={() => setSelectedForCompare([])}
+                              className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                            >
+                              <span className="text-2xl text-slate-600">×</span>
+                            </button>
+                          </div>
+
+                          {/* Modal Content - Side by Side */}
+                          <div className="p-6">
+                            <div className="grid md:grid-cols-2 gap-6">
+                              {/* First Selected Scan */}
+                              <div className="space-y-4 p-6 bg-blue-50 rounded-2xl border-2 border-blue-200">
+                                <div className="text-center mb-4">
+                                  <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Scan 1</p>
+                                  <p className="text-sm text-slate-600 font-mono truncate">{selectedForCompare[0].filename}</p>
+                                </div>
+
+                                <div className="space-y-3">
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-slate-700 font-bold flex items-center gap-1">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-500"/> Normal
+                                      </span>
+                                      <span className="font-mono text-emerald-600 font-black text-sm">
+                                        {Math.round((selectedForCompare[0].predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-emerald-500 transition-all duration-1000"
+                                        style={{width: `${(selectedForCompare[0].predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100}%`}}
+                                      ></div>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-slate-700 font-bold flex items-center gap-1">
+                                        <AlertCircle className="w-4 h-4 text-rose-500"/> Aneurysm
+                                      </span>
+                                      <span className="font-mono text-rose-600 font-black text-sm">
+                                        {Math.round((selectedForCompare[0].predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-rose-500 transition-all duration-1000"
+                                        style={{width: `${(selectedForCompare[0].predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100}%`}}
+                                      ></div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {selectedForCompare[0].scan_data && selectedForCompare[0].heatmap_data && (
+                                  <div className="mt-4">
+                                    <NiftiViewer
+                                      scanData={selectedForCompare[0].scan_data}
+                                      heatmapData={selectedForCompare[0].heatmap_data}
+                                      predictedClass={selectedForCompare[0].predicted_class}
+                                      confidence={selectedForCompare[0].confidence}
+                                      showExplanations={false}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Second Selected Scan */}
+                              <div className="space-y-4 p-6 bg-purple-50 rounded-2xl border-2 border-purple-200">
+                                <div className="text-center mb-4">
+                                  <p className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-1">Scan 2</p>
+                                  <p className="text-sm text-slate-600 font-mono truncate">{selectedForCompare[1].filename}</p>
+                                </div>
+
+                                <div className="space-y-3">
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-slate-700 font-bold flex items-center gap-1">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-500"/> Normal
+                                      </span>
+                                      <span className="font-mono text-emerald-600 font-black text-sm">
+                                        {Math.round((selectedForCompare[1].predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-emerald-500 transition-all duration-1000"
+                                        style={{width: `${(selectedForCompare[1].predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100}%`}}
+                                      ></div>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-slate-700 font-bold flex items-center gap-1">
+                                        <AlertCircle className="w-4 h-4 text-rose-500"/> Aneurysm
+                                      </span>
+                                      <span className="font-mono text-rose-600 font-black text-sm">
+                                        {Math.round((selectedForCompare[1].predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-rose-500 transition-all duration-1000"
+                                        style={{width: `${(selectedForCompare[1].predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100}%`}}
+                                      ></div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {selectedForCompare[1].scan_data && selectedForCompare[1].heatmap_data && (
+                                  <div className="mt-4">
+                                    <NiftiViewer
+                                      scanData={selectedForCompare[1].scan_data}
+                                      heatmapData={selectedForCompare[1].heatmap_data}
+                                      predictedClass={selectedForCompare[1].predicted_class}
+                                      confidence={selectedForCompare[1].confidence}
+                                      showExplanations={false}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Single explanation section at bottom */}
+                            <div className="space-y-4 mt-6">
+                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                <p className="text-sm font-bold text-slate-700 mb-2">Understanding the Views</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
+                                  <div>
+                                    <p className="font-semibold text-slate-800">Top Left: Side View</p>
+                                    <p className="text-slate-500">Sagittal (L↔R)</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-800">Top Right: Front View</p>
+                                    <p className="text-slate-500">Coronal (F↔B)</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-800">Bottom Left: Top View</p>
+                                    <p className="text-slate-500">Axial (T↔B)</p>
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-800">Bottom Right: 3D View</p>
+                                    <p className="text-slate-500">Volume Rendering</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-white p-4 rounded-xl border border-slate-200">
+                                <p className="text-sm font-bold text-slate-700 mb-3">Aneurysm Detection Heatmap</p>
+                                <div className="flex items-center gap-4 mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 bg-gray-400 rounded"></div>
+                                    <span className="text-sm text-slate-600">Vessel Tissue</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-16 h-4 rounded" style={{background: 'linear-gradient(to right, #FFFF00, #FF8C00, #FF0000)'}}></div>
+                                    <span className="text-sm text-slate-600">Suspicion Level</span>
+                                  </div>
+                                </div>
+                                <div className="text-xs text-slate-600 space-y-1 bg-slate-50 p-3 rounded">
+                                  <p>• <strong>Yellow:</strong> Low suspicion</p>
+                                  <p>• <strong>Orange:</strong> Moderate suspicion</p>
+                                  <p>• <strong>Red:</strong> High suspicion</p>
+                                </div>
+                              </div>
+
+                              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                <p className="text-sm font-bold text-blue-900 mb-2">Viewer Controls</p>
+                                <ul className="text-xs text-blue-800 space-y-1">
+                                  <li>• <strong>Click:</strong> Move crosshair</li>
+                                  <li>• <strong>Right Click + Drag:</strong> Adjust brightness/contrast</li>
+                                  <li>• <strong>Scroll:</strong> Zoom</li>
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Modal for Batch Result Detail View */}
+                    {selectedResult && (
+                      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedResult(null)}>
+                        <div className="bg-white rounded-3xl max-w-5xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                          {/* Modal Header */}
+                          <div className="sticky top-0 bg-white border-b border-slate-200 p-6 rounded-t-3xl flex items-center justify-between z-10">
+                            <div>
+                              <h3 className="text-2xl font-bold text-slate-900">{selectedResult.filename}</h3>
+                              <p className="text-sm text-slate-500 mt-1">Detailed Analysis View</p>
+                            </div>
+                            <button
+                              onClick={() => setSelectedResult(null)}
+                              className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                            >
+                              <span className="text-2xl text-slate-600">×</span>
+                            </button>
+                          </div>
+
+                          {/* Modal Content */}
+                          <div className="p-6 space-y-6">
+                            {/* Classification Results */}
+                            <div className="space-y-4">
+                              <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Classification Results</h4>
+                              <div className="space-y-4">
+                                {/* Normal Bar */}
+                                <div className="space-y-2">
+                                  <div className="flex justify-between text-base">
+                                    <span className="text-slate-700 font-bold flex items-center gap-2">
+                                      <CheckCircle2 className="w-5 h-5 text-emerald-500"/> Normal / Healthy
+                                    </span>
+                                    <span className="font-mono text-emerald-600 font-black">
+                                      {Math.round((selectedResult.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100)}%
+                                    </span>
+                                  </div>
+                                  <div className="h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                    <div
+                                      className="h-full bg-emerald-500 transition-all duration-1000"
+                                      style={{width: `${(selectedResult.predictions.find(p => p[0] === "Normal")?.[1] || 0) * 100}%`}}
+                                    ></div>
+                                  </div>
+                                </div>
+
+                                {/* Aneurysm Bar */}
+                                <div className="space-y-2">
+                                  <div className="flex justify-between text-base">
+                                    <span className="text-slate-700 font-bold flex items-center gap-2">
+                                      <AlertCircle className="w-5 h-5 text-rose-500"/> Aneurysm Detected
+                                    </span>
+                                    <span className="font-mono text-rose-600 font-black">
+                                      {Math.round((selectedResult.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100)}%
+                                    </span>
+                                  </div>
+                                  <div className="h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                    <div
+                                      className="h-full bg-rose-500 transition-all duration-1000"
+                                      style={{width: `${(selectedResult.predictions.find(p => p[0] === "Aneurysm")?.[1] || 0) * 100}%`}}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 3D Visualization */}
+                            {selectedResult.scan_data && selectedResult.heatmap_data && (
+                              <div className="pt-6 border-t border-slate-200">
+                                <h4 className="text-lg font-bold text-slate-900 mb-4">3D Visualization with Aneurysm Detection Heatmap</h4>
+                                <NiftiViewer
+                                  scanData={selectedResult.scan_data}
+                                  heatmapData={selectedResult.heatmap_data}
+                                  predictedClass={selectedResult.predicted_class}
+                                  confidence={selectedResult.confidence}
+                                />
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
