@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a;stop-opacity:0.08" />
+      <stop offset="50%" style="stop-color:#1e40af;stop-opacity:0.06" />
+      <stop offset="100%" style="stop-color:#334155;stop-opacity:0.08" />
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#grad2)"/>
+
+  <!-- Medical professionals silhouettes (simplified) -->
+  <ellipse cx="700" cy="400" rx="80" ry="80" fill="#1e40af" opacity="0.08"/>
+  <rect x="620" y="480" width="160" height="220" rx="20" fill="#1e40af" opacity="0.08"/>
+
+  <ellipse cx="1000" cy="420" rx="75" ry="75" fill="#3b82f6" opacity="0.08"/>
+  <rect x="925" y="495" width="150" height="200" rx="20" fill="#3b82f6" opacity="0.08"/>
+
+  <ellipse cx="1280" cy="410" rx="78" ry="78" fill="#1e40af" opacity="0.08"/>
+  <rect x="1202" y="488" width="156" height="215" rx="20" fill="#1e40af" opacity="0.08"/>
+
+  <!-- Medical equipment outline -->
+  <rect x="400" y="650" width="1120" height="300" rx="15" fill="none" stroke="#1e40af" stroke-width="2" opacity="0.06"/>
+  <circle cx="960" cy="800" r="80" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.06"/>
+
+  <!-- Cross symbol -->
+  <rect x="940" y="750" width="40" height="100" fill="#1e40af" opacity="0.08"/>
+  <rect x="910" y="780" width="100" height="40" fill="#1e40af" opacity="0.08"/>
+
+  <!-- Text watermark -->
+  <text x="960" y="540" font-family="Arial" font-size="48" fill="#1e40af" opacity="0.05" text-anchor="middle" dominant-baseline="middle">PLACEHOLDER - Add medical team image</text>
+</svg>

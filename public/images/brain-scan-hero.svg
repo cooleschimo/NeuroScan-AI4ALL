@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af;stop-opacity:0.1" />
+      <stop offset="50%" style="stop-color:#3b82f6;stop-opacity:0.05" />
+      <stop offset="100%" style="stop-color:#60a5fa;stop-opacity:0.1" />
+    </linearGradient>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+      <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#1e40af" stroke-width="0.5" opacity="0.1"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#grad1)"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+
+  <!-- Brain outline -->
+  <ellipse cx="960" cy="540" rx="400" ry="350" fill="none" stroke="#1e40af" stroke-width="3" opacity="0.15"/>
+  <ellipse cx="960" cy="540" rx="350" ry="300" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.1"/>
+  <path d="M 560 540 Q 960 240 1360 540" fill="none" stroke="#1e40af" stroke-width="2" opacity="0.12"/>
+  <path d="M 560 540 Q 960 840 1360 540" fill="none" stroke="#1e40af" stroke-width="2" opacity="0.12"/>
+
+  <!-- Scan lines -->
+  <line x1="400" y1="200" x2="400" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="600" y1="200" x2="600" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="800" y1="200" x2="800" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="1000" y1="200" x2="1000" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="1200" y1="200" x2="1200" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="1400" y1="200" x2="1400" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+  <line x1="1600" y1="200" x2="1600" y2="880" stroke="#3b82f6" stroke-width="1" opacity="0.08"/>
+
+  <!-- Text watermark -->
+  <text x="960" y="540" font-family="Arial" font-size="48" fill="#1e40af" opacity="0.05" text-anchor="middle" dominant-baseline="middle">PLACEHOLDER - Add real brain scan image</text>
+</svg>
